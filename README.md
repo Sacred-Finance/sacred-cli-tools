@@ -57,14 +57,15 @@ operation can be diposit/withdraw
 
 It shows calculated AP amount based on deposit / withdrawal block number
 
-`reward <note> <recipient>`
+`reward <note>`
 
-It claiming reward and returns your AAVE interests to the recipient address.  
-With executing this, you can get your encoded account that contains your AP.  
+It claim your reward.  
+With executing this, you can get your encoded account that contains your AP and Aave interests amount.  
 
 `rewardswap <account> <recipient>`
 
-It swaps your AP that is included in your account to ETH.
+It swaps your APs in your account to ETH with SacredToken and send it to the recipipent address.  
+And it also send your Aave interests to the recipipent address
 
 
 
