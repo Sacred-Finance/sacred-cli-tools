@@ -15,15 +15,41 @@ const websnarkUtils = require('websnark/src/utils')
 const buildGroth16 = require('websnark/src/groth16')
 const { ethers } = require("hardhat")
 let provider
-async function getProvider() {
+
+async function getProvider(rpc) {
   if(!provider) {
     if(ethers.provider && typeof hre !== 'undefined') {
       provider = ethers.provider
     } else {
-      provider = new ethers.providers.JsonRpcProvider(process.env.RPC_URL)
+      if(!rpc) {
+        rpc = getRPCUrl()
+      }
+      provider = new ethers.providers.JsonRpcProvider(rpc)
     }
   }
   return provider
+}
+
+function getRPCUrl() {
+  let rpc = ""
+  switch(process.env.NET_ID) {
+    case "1":
+      rpc = process.env.MAINNET_RPC_URL
+      break
+    case "42":
+      rpc = process.env.KOVAN_RPC_URL
+      break
+    case "4":
+      rpc = process.env.RINKEBY_RPC_URL
+      break
+    case "137":
+      rpc = process.env.POLYGON_RPC_URL
+      break
+    case "80001":
+      rpc = process.env.MUMBAI_RPC_URL
+      break
+  }
+  return rpc
 }
 
 /**
@@ -74,21 +100,22 @@ async function getProvider() {
 };
 
 class Controller {
-  constructor({ contract, sacredTreesContract, merkleTreeHeight, provingKeys, groth16 }) {
+  constructor({ minerContract, sacredTreesContract, merkleTreeHeight, provingKeys, groth16 }) {
     this.merkleTreeHeight = Number(merkleTreeHeight)
     this.provingKeys = provingKeys
-    this.contract = contract
+    this.minerContract = minerContract
     this.sacredTreesContract = sacredTreesContract
     this.groth16 = groth16
   }
 
-  async init() {
+  async init(rpc) {
     this.groth16 = await buildGroth16()
+    await getProvider(rpc)
   }
 
   async _fetchAccountCommitments() {
-    const events = await getEvents(this.contract, {eventName:'NewAccount', fromBlock: 0, toBlock: 'latest' })
-    // const events = await this.contract.getPastEvents('NewAccount', {
+    const events = await getEvents(this.minerContract, {eventName:'NewAccount', fromBlock: 0, toBlock: 'latest' })
+    // const events = await this.minerContract.getPastEvents('NewAccount', {
     //   fromBlock: 0,
     //   toBlock: 'latest',
     // })
@@ -180,15 +207,18 @@ class Controller {
     withdrawalDataEvents = null,
   }) {
     if(!rate) {
-      rate = await this.contract.rates(note.instance)
+      rate = await this.minerContract.rates(note.instance)
       rate = rate.toString()
     }
-    const newAmount = account.amount.add(
-      toBN(rate)
-        .mul(toBN(note.withdrawalBlock).sub(toBN(note.depositBlock)))
-        .sub(toBN(fee)),
-    )
-    const newAccount = new Account({ amount: newAmount })
+    const apAmount = toBN(rate).mul(toBN(note.withdrawalBlock).sub(toBN(note.depositBlock)))
+    const newApAmount = account.apAmount.add(apAmount.sub(toBN(fee)))
+
+    const tx = await (await this.minerContract.getAaveInterestsAmount(toFixedHex(note.rewardNullifier), toFixedHex(apAmount.toString()))).wait();
+    const amountEvent = tx.events.find(item => item.event === 'AaveInterestsAmount')
+    let aaveInterestAmount = toBN(amountEvent.args.amount.toString());
+    let newAaveInterestAmount = account.aaveInterestAmount.add(aaveInterestAmount);
+
+    const newAccount = new Account({ apAmount: newApAmount, aaveInterestAmount: newAaveInterestAmount })
 
     depositDataEvents = depositDataEvents || (await this._fetchDepositDataEvents())
     const depositLeaves = depositDataEvents.map((x) => {
@@ -248,9 +278,10 @@ class Controller {
       noteSecret: note.secret,
       noteNullifier: note.nullifier,
       noteNullifierHash: note.nullifierHash,
-
-      amount: toBN(rate).mul(toBN(note.withdrawalBlock).sub(toBN(note.depositBlock))),
-      inputAmount: account.amount,
+      apAmount: toBN(rate).mul(toBN(note.withdrawalBlock).sub(toBN(note.depositBlock))),
+      aaveInterestAmount: aaveInterestAmount,
+      inputApAmount: account.apAmount,
+      inputAaveInterestAmount: account.aaveInterestAmount,
       inputSecret: account.secret,
       inputNullifier: account.nullifier,
       inputRoot: accountTreeUpdate.oldRoot,
@@ -258,7 +289,8 @@ class Controller {
       inputPathIndices: bitsToNumber(accountPath.pathIndices),
       inputNullifierHash: account.nullifierHash,
 
-      outputAmount: newAccount.amount,
+      outputApAmount: newAccount.apAmount,
+      outputAaveInterestAmount: newAccount.aaveInterestAmount,
       outputSecret: newAccount.secret,
       outputNullifier: newAccount.nullifier,
       outputRoot: accountTreeUpdate.newRoot,
@@ -290,7 +322,8 @@ class Controller {
       rate: toFixedHex(input.rate),
       fee: toFixedHex(input.fee),
       instance: toFixedHex(input.instance, 20),
-      amount: toFixedHex(input.amount.toString()),
+      apAmount: toFixedHex(input.apAmount.toString()),
+      aaveInterestAmount: toFixedHex(input.aaveInterestAmount.toString()),
       rewardNullifier: toFixedHex(input.rewardNullifier),
       extDataHash: toFixedHex(input.extDataHash),
       depositRoot: toFixedHex(input.depositRoot),
@@ -315,9 +348,10 @@ class Controller {
     }
   }
 
-  async withdraw({ account, amount, recipient, publicKey, fee = 0, relayer = 0, accountCommitments = null }) {
-    const newAmount = account.amount.sub(toBN(amount)).sub(toBN(fee))
-    const newAccount = new Account({ amount: newAmount })
+  async withdraw({ account, apAmount, aaveInterestAmount, recipient, publicKey, fee = 0, relayer = 0, accountCommitments = null }) {
+    const newApAmount = account.apAmount.sub(toBN(apAmount)).sub(toBN(fee))
+    const newAaveInterestAmount = account.aaveInterestAmount.sub(toBN(aaveInterestAmount))
+    const newAccount = new Account({ apAmount: newApAmount, aaveInterestAmount: newAaveInterestAmount })
 
     accountCommitments = accountCommitments || (await this._fetchAccountCommitments())
     const accountTree = new MerkleTree(this.merkleTreeHeight, accountCommitments, {
@@ -334,10 +368,12 @@ class Controller {
     const extDataHash = getExtWithdrawArgsHash({ fee, recipient, relayer, encryptedAccount })
 
     const input = {
-      amount: toBN(amount).add(toBN(fee)),
+      apAmount: toBN(apAmount).add(toBN(fee)),
+      aaveInterestAmount: toBN(aaveInterestAmount),
       extDataHash,
 
-      inputAmount: account.amount,
+      inputApAmount: account.apAmount,
+      inputAaveInterestAmount: account.aaveInterestAmount,
       inputSecret: account.secret,
       inputNullifier: account.nullifier,
       inputNullifierHash: account.nullifierHash,
@@ -345,7 +381,8 @@ class Controller {
       inputPathIndices: bitsToNumber(accountPath.pathIndices),
       inputPathElements: accountPath.pathElements,
 
-      outputAmount: newAccount.amount,
+      outputApAmount: newAccount.apAmount,
+      outputAaveInterestAmount: newAccount.aaveInterestAmount,
       outputSecret: newAccount.secret,
       outputNullifier: newAccount.nullifier,
       outputRoot: accountTreeUpdate.newRoot,
@@ -363,7 +400,8 @@ class Controller {
     const { proof } = websnarkUtils.toSolidityInput(proofData)
 
     const args = {
-      amount: toFixedHex(input.amount),
+      apAmount: toFixedHex(input.apAmount),
+      aaveInterestAmount: toFixedHex(input.aaveInterestAmount),
       extDataHash: toFixedHex(input.extDataHash),
       extData: {
         fee: toFixedHex(fee),
