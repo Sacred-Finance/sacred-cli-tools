@@ -20,7 +20,7 @@ const { fromWei, toWei, toBN, BN } = require('web3-utils')
 let web3, proxyContract, instanceContract, circuit, proving_key, groth16, erc20, senderAccount
 let MERKLE_TREE_HEIGHT
 
-const { DEPLOYER, SALT, NET_ID } = process.env
+const { DEPLOYER, SALT, NET_ID, AIRDROP_RECEIVER } = process.env
 
 let addressTable = {}
 let provider
