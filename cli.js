@@ -52,7 +52,6 @@ async function init(rpc) {
   if(!provider) {
     provider = await utils.getProvider(rpc)
   }
-
   const { chainId } = await provider.getNetwork()
   netId = chainId
   wallet = new ethers.Wallet(PRIVATE_KEY, provider)  
@@ -155,7 +154,7 @@ async function main() {
     .command('showpendings <operation>')
     .description('Perform batch update root of SacredTree. operation indicates deposit or withdraw')
     .action(async (operation) => {
-      await init(program.rpc)
+      await init(program.rpc || RPC_URL)
       operation = operation.toLowerCase()
       if (operation === "deposit") {
         const { committedEvents, pendingEvents } = await rootUpdaterEvents.getEvents(action.DEPOSIT)
