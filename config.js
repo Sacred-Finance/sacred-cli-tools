@@ -63,10 +63,10 @@ module.exports = {
     netId4: {
       eth: {
         instanceAddress: {
-          '0.1': '0xd1C047765610da65E28D12acF354D11bE3233845',
-          '1': '0x95c58b3ae4AE6A32A04f800f7BEC1dC9A9D4d798',
-          '10': '0x533F4775C17aFBA952fd4eF8Db9F292D0e5b20aB',
-          '100': '0xD752a914dDE2B1646D8f8ebE40f73ec746D553A5'
+          '0.1': '0x6A52643f72e91e5c7e16ac09f283689fe2ff45F9',
+          '1': '0xCf16f2fEd25814CE4B264e5158682C31Ea8C45c8',
+          '10': '0x5Ab5110fA1d580522b32FEC5A5dC943414777daB',
+          '100': '0x6aa728410B0b3caf8EE0EF705575E8894Eb4337E'
         },
         symbol: 'ETH',
         decimals: 18
